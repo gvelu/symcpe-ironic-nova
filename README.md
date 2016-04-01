@@ -23,15 +23,11 @@ Installation
 
 2. Install sym_nova extension
 3. Update nova configuration (/etc/nova/nova.conf):
-  3.1. /etc/nova/nova.conf on Ironic compute node
-  compute_driver = symcpe.ironic.nova.virt.ironic.driver.SymIronicDriver
-  network_api_class = symcpe.ironic.nova.network.api.API
-  3.2. /etc/nova/nova.conf on scheduler
-  Extend filter list by SymCpeCapabilitiesFilter
-  3.3. /etc/neutron/dhcp_agent.ini on neutron node
-  interface_driver =neutron.agent.linux.interface.NullDriver
-  dhcp_driver = symcpe.ironic.neutron.dhcp.Dnsmasq
-  use_namespaces = False
+ - compute_driver = sym_nova.virt.ironic.driver.SymIronicDriver
+ - network_api_class = sym_nova.network.api.API
+ - scheduler_use_baremetal_filters=True
+ - baremetal_scheduler_default_filters=RetryFilter
+
 4. Restart Nova
 5. Create prod/mgmt/api/data networks.
 6. Create subnets per rack for each network
