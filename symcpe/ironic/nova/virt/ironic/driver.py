@@ -13,6 +13,7 @@
 # under the License.
 
 import netaddr
+import re
 
 from oslo_config import cfg
 from nova import exception
@@ -61,9 +62,11 @@ class MacFactory(object):
 
             def tagged2mac(_net):
                 return iface2mac(self.net_map[_net['interfaces'][0]])
+
             type2lambda = dict(tagged=tagged2mac,
                                bond=iface2mac,
                                symlink=iface2mac)
+
             name = network['name']
             for net in self.net_map.values():
                 vlan = str(net.get('vlan', ''))
@@ -77,8 +80,35 @@ class MacFactory(object):
         return item in self.interfaces.values()
 
 
+class IronicClientWrapper(object):
+    def __init__(self, parent):
+        self.client = parent
+        self.node_list_re = re.compile(CONF.symcpe.bm_filter_value)
+
+    def call(self, func, *args, **kwargs):
+        def filter_node(_node):
+            fields = CONF.symcpe.bm_filter_key.split('.')
+            temp = getattr(_node, fields[0])
+            for _i in fields[1:]:
+                temp = temp[_i]
+            return bool(self.node_list_re.findall(temp))
+
+        if func == 'node.list':
+            kwargs['detail'] = True
+        result = self.client.call(func, *args, **kwargs)
+        if func == 'node.list':
+            return [i for i in result if filter_node(i)]
+        else:
+            return result
+
+
 class SymIronicDriver(driver.IronicDriver):
     """Hypervisor driver for Ironic - bare metal provisioning."""
+
+    def __init__(self, *args, **kwargs):
+        super(SymIronicDriver, self).__init__(*args, **kwargs)
+        if CONF.symcpe.bm_filter_enabled:
+            self.ironicclient = IronicClientWrapper(self.ironicclient)
 
     def macs_for_instance(self, instance):
         """ Returns (mac, extra) factory. Is returned instead of MAC
@@ -129,7 +159,6 @@ class SymIronicDriver(driver.IronicDriver):
                       net['network']['subnets'][0]['cidr']).netmask),
                   gw=net['network']['subnets'][0]['gateway']['address']))
             for net in network_info)
-
         return super(SymIronicDriver, self)._generate_configdrive(
             instance, node, network_info, extra_md, files)
 
