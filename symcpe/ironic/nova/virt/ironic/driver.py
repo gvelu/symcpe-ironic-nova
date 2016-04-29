@@ -22,6 +22,9 @@ from nova.virt.ironic import driver
 LOG = driver.LOG
 
 opts = [
+    cfg.BoolOpt('bm_filter_enabled', default=False, help=''),
+    cfg.StrOpt('bm_filter_key', default='properties.capabilities', help=''),
+    cfg.StrOpt('bm_filter_value', default='.*', help=''),
     cfg.DictOpt('tag2net',
                 default={'101': 'mgmt', '102': 'data', '103': 'prod'},
                 help='Dictionary to match vlan tag to network name to get'
