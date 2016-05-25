@@ -15,7 +15,7 @@
 import netaddr
 from oslo_config import cfg
 from neutron.agent.linux import dhcp
-from neutron.agent.linux import utils
+from neutron.common import utils as common_utils
 
 
 OPTS = [
@@ -33,12 +33,17 @@ WIN2k3_STATIC_DNS = dhcp.WIN2k3_STATIC_DNS
 
 class Dnsmasq(dhcp.Dnsmasq):
 
+    def _get_process_manager(self, cmd_callback=None):
+        mgr = super(Dnsmasq, self)._get_process_manager(cmd_callback)
+        mgr.namespace = None
+        return mgr
+
     def enable(self):
         """Enables DHCP for this network by spawning a local process."""
         if self.active:
             self.restart()
         elif self._enable_dhcp():
-            utils.ensure_dir(self.network_conf_dir)
+            common_utils.ensure_dir(self.network_conf_dir)
             self.interface_name = cfg.CONF.symcpe.dhcp_interface
             self.spawn_process()
 

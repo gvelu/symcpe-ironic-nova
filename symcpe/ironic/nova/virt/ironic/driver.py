@@ -35,6 +35,7 @@ symcpe_group = cfg.OptGroup(name='symcpe', title='Symantec CPE Options')
 CONF = cfg.CONF
 CONF.register_group(symcpe_group)
 CONF.register_opts(opts, symcpe_group)
+driver._NODE_FIELDS = driver._NODE_FIELDS + ('extra',)
 
 
 class MacFactory(object):

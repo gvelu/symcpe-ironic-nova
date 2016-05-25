@@ -15,10 +15,12 @@
 
 from oslo_log import log as logging
 from nova.compute import manager
+from nova.compute.manager import _LI, _LE, exception
 
 
 LOG = logging.getLogger(__name__)
 DEFAULT_RESOURCE_NAME = 'nova'
+CONF = manager.CONF
 
 
 class ComputeManager(manager.ComputeManager):
@@ -31,9 +33,9 @@ class ComputeManager(manager.ComputeManager):
         super(ComputeManager, self).__init__(*args, **kwargs)
 
     def _build_and_run_instance(
-            self, context, instance, image, decoded_files, admin_password,
-            requested_networks, security_groups, block_device_mapping, node,
-            limits, filter_properties):
+            self, context, instance, image, injected_files,
+            admin_password, requested_networks, security_groups,
+            block_device_mapping, node, limits, filter_properties):
         LOG.debug("HookBuild PRE begin")
         name, meta = self.driver.generate_name(context, instance, node)
         instance.metadata.update(meta)
@@ -42,22 +44,16 @@ class ComputeManager(manager.ComputeManager):
         instance.display_description = name
         instance.save()
         return super(ComputeManager, self)._build_and_run_instance(
-            context, instance, image, decoded_files, admin_password,
-            requested_networks, security_groups, block_device_mapping, node,
-            limits, filter_properties)
+            context, instance, image, injected_files,
+            admin_password, requested_networks, security_groups,
+            block_device_mapping, node, limits, filter_properties)
 
     def _destroy_evacuated_instances(self, context):
-        """When Ironic hostname is changed this can destroy everything"""
-        our_host = self.host
-        filters = {'deleted': False}
-        local_instances = self._get_instances_on_driver(context, filters)
-        for instance in local_instances:
-            if instance.host != our_host:
-                # Sergii patch on
-                LOG.warning('Sergii: prevent node from deleting')
-                continue
+        """Destroys evacuated instances.
+        """
+        return
 
-    @manager.periodic_task.periodic_task
+    @manager.periodic_task.periodic_task(spacing=CONF.update_resources_interval)
     def update_available_resource(self, context):
         """See driver.get_available_resource()
 
@@ -67,18 +63,36 @@ class ComputeManager(manager.ComputeManager):
         :param context: security context
         """
         new_resource_tracker_dict = {}
+
+        compute_nodes_in_db = self._get_compute_nodes_in_db(context,
+                                                            use_slave=True)
         nodenames = set(self.driver.get_available_nodes())
         for nodename in nodenames:
             rt = self._get_resource_tracker(nodename)
-            rt.update_available_resource(context)
+            try:
+                rt.update_available_resource(context)
+            except exception.ComputeHostNotFound:
+                # NOTE(comstud): We can get to this case if a node was
+                # marked 'deleted' in the DB and then re-added with a
+                # different auto-increment id. The cached resource
+                # tracker tried to update a deleted record and failed.
+                # Don't add this resource tracker to the new dict, so
+                # that this will resolve itself on the next run.
+                LOG.info(_LI("Compute node '%s' not found in "
+                             "update_available_resource."), nodename)
+                continue
+            except Exception:
+                LOG.exception(_LE("Error updating resources for node "
+                              "%(node)s."), {'node': nodename})
             new_resource_tracker_dict[nodename] = rt
 
-        # Delete orphan compute node not reported by driver but still in db
-        compute_nodes_in_db = self._get_compute_nodes_in_db(context,
-                                                            use_slave=True)
+        # NOTE(comstud): Replace the RT cache before looping through
+        # compute nodes to delete below, as we can end up doing greenthread
+        # switches there. Best to have everyone using the newest cache
+        # ASAP.
+        self._resource_tracker_dict = new_resource_tracker_dict
 
+        # Delete orphan compute node not reported by driver but still in db
         for cn in compute_nodes_in_db:
             if cn.hypervisor_hostname not in nodenames:
                 LOG.warning("Prevent Deleting orphan compute node %s" % cn.id)
-
-        self._resource_tracker_dict = new_resource_tracker_dict

@@ -12,6 +12,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import nova.network
 from nova.network.neutronv2 import api
 from nova.virt.ironic import client_wrapper
 
@@ -30,6 +31,9 @@ def set_patch(iterable=None):
         return set(iterable)
 
 api.set = set_patch
+
+#Another ugly line to make nova understand that we are neutron based
+nova.network.is_neutron = lambda: True
 
 
 class API(api.API):

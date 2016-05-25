@@ -16,19 +16,19 @@ from nova.scheduler import ironic_host_manager
 from nova.scheduler import host_manager
 
 
-class IronicHostManager(ironic_host_manager.IronicHostManager):
-    def host_state_cls(self, host, node, **kwargs):
-        """Factory function/property to create a new HostState."""
-        compute = kwargs.get('compute')
-        if compute and compute.get('hypervisor_type') == hv_type.IRONIC:
-            return IronicNodeState(host, node, **kwargs)
-        else:
-            return host_manager.HostState(host, node, **kwargs)
-
-
 class IronicNodeState(ironic_host_manager.IronicNodeState):
     def consume_from_instance(self, instance):
         if 'consumed_hosts' not in instance:
             instance['consumed_hosts'] = dict()
         instance['consumed_hosts'][self.nodename] = self.stats.get('rack')
         return super(IronicNodeState, self).consume_from_instance(instance)
+
+
+class IronicHostManager(ironic_host_manager.IronicHostManager):
+    def host_state_cls(self, host, node, **kwargs):
+        """Factory function/property to create a new HostState."""
+        compute = kwargs.get('compute')
+        if compute and compute.get('hypervisor_type') == hv_type.IRONIC:
+            return IronicNodeState(host, node)
+        else:
+            return host_manager.HostState(host, node)
