@@ -17,11 +17,13 @@ from nova.scheduler import host_manager
 
 
 class IronicNodeState(ironic_host_manager.IronicNodeState):
-    def consume_from_instance(self, instance):
-        if 'consumed_hosts' not in instance:
-            instance['consumed_hosts'] = dict()
-        instance['consumed_hosts'][self.nodename] = self.stats.get('rack')
-        return super(IronicNodeState, self).consume_from_instance(instance)
+
+    def consume_from_request(self, spec_obj):
+        """Incrementally update host state from a RequestSpec object."""
+        if not getattr(spec_obj, 'consumed_hosts', None):
+            spec_obj.consumed_hosts = dict()
+        spec_obj.consumed_hosts[self.nodename] = self.stats.get('rack')
+        return super(IronicNodeState, self).consume_from_request(spec_obj)
 
 
 class IronicHostManager(ironic_host_manager.IronicHostManager):

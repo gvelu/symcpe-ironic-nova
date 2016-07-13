@@ -15,9 +15,10 @@
 import collections
 
 from nova.i18n import _
-from oslo.config import cfg
+from oslo_config import cfg
 from oslo_log import log as logging
 
+from nova.objects import instance
 from nova.compute import api as compute
 from nova.scheduler import weights as weights_base
 
@@ -34,7 +35,7 @@ class RackDistributionWeigher(weights_base.BaseHostWeigher):
 
     def weigh_objects(self, weighed_obj_list, weight_properties):
         """ Weigh multiple objects."""
-        flavor = weight_properties['instance_type']
+        flavor = weight_properties.flavor
         spec = flavor.get('extra_specs', {})
         sku = spec.get('sku') or spec.get('capabilities:sku')
         if sku:
@@ -44,37 +45,36 @@ class RackDistributionWeigher(weights_base.BaseHostWeigher):
                 weighed_obj_list, weight_properties)
 
     def _weight_bm_objects(self, weighed_obj_list, weight_properties):
+        # Context was moved under protected members, but we still need it
+        ctx = weight_properties._context.elevated()
 
-        spec = weight_properties.get('request_spec', {})
-        props = spec.get('instance_properties', {})
-
-        if not props:
-            raise compute.exception.NotFound(_('Properties not found'))
-
-        role = props['metadata'].get('role') or props['hostname']
-        context = weight_properties['context'].elevated()
+        # We need to get all instances from the requestor's project with
+        # the same role
+        i_obj = instance.Instance.get_by_uuid(ctx,
+                                              weight_properties.instance_uuid)
+        role = i_obj.metadata.get('role') or i_obj.hostname
 
         # Get all instances with the same role + project. Ignore failed BMs
         instances = self.compute_api.get_all(
-            context, {'deleted': False,
-                      'project_id': weight_properties['project_id']})
+            ctx, {'deleted': False, 'project_id': ctx.project_id})
         instances = [_i for _i in instances
-                     if _i['vm_state'] != 'error' and
-                     'rack' in _i['metadata'] and
-                     _i['metadata'].get('role') == role]
+                     if (_i['vm_state'] != 'error' and
+                         'rack' in _i['metadata'] and
+                         _i['metadata'].get('role') == role)]
 
         # Get number of instances per rack
         instances_per_rack = collections.defaultdict(int)
         for _i in instances:
             instances_per_rack[_i['metadata']['rack']] += 1
+
         # Update with already consumed instances
-        for rack in props.get('consumed_hosts', {}).values():
+        for rack in getattr(weight_properties, 'consumed_hosts', {}).values():
             instances_per_rack[rack] += 1
 
         # Store it to be passed to self._weigh_object
-        weight_properties['rack2instances'] = instances_per_rack
-        weight_properties['rack_max'] = float(max(instances_per_rack.values())
-                                              if instances_per_rack else 1)
+        weight_properties.rack2instances = instances_per_rack
+        weight_properties.rack_max = float(max(instances_per_rack.values())
+                                           if instances_per_rack else 1)
         LOG.debug('instances_per_rack: %s', repr(instances_per_rack))
         # Calculate the weights
         weights = []
@@ -95,17 +95,17 @@ class RackDistributionWeigher(weights_base.BaseHostWeigher):
 
             weights.append(weight)
 
-        LOG.debug(_("Weigher returning weights: %s"), weights)
+        LOG.debug(_("Weighter returning weights: %s"), weights)
         return weights
 
     def _weigh_object(self, host_state, weight_properties):
         # This function returns maximum weight for a host
         # belonging to the minimum_used_hosts list.
-        if weight_properties.get('rack2instances'):
+        if getattr(weight_properties, 'rack2instances', None):
             rack = host_state.stats.get('rack')
             if not rack:
                 raise compute.exception.NotFound(_('Rack stats not found'))
-            return (weight_properties['rack_max'] -
-                    weight_properties['rack2instances'][rack])
+            return (weight_properties.rack_max -
+                    weight_properties.rack2instances[rack])
         else:
             return 1.0
